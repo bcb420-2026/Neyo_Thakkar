@@ -1,0 +1,30 @@
+---
+title: "Journal Entry 01"
+output: html_document
+date: "2026-01-09"
+---
+```{r}
+# 1. Create a 5x10 matrix of random integers
+set.seed(67) 
+
+matrix <- matrix(sample(1:100, 50, replace = TRUE), nrow = 5, ncol = 10)
+
+# 2. Change column names
+colnames(matrix) <- c("cond1", "cond2", "cond3", "cond4", "cond5", "ctrl1", "ctrl2", "ctrl3", "ctrl4", "ctrl5")
+
+# 3. Change row names
+rownames(matrix) <- c("gene1", "gene2","gene3","gene4","gene5")
+
+# 4. Get means of control and conditions 
+cond <- rowMeans(matrix[, 1:5])
+ctrl <- rowMeans(matrix[, 6:10])
+
+# 5. Get fold change 
+fold_change <- cond/ctrl
+
+# 6. Stitch it all together 
+results <- cbind(matrix, fold_change)
+
+print(results)
+```
+
