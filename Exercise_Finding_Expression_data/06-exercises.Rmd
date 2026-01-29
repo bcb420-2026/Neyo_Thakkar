@@ -1,0 +1,89 @@
+
+# Exercises: Inspect Specific GEO Series
+
+In this exercise, you'll retrieve metadata for the following GEO Series and answer:
+
+# Web version of GEO was utilized to answer the questions below: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi
+
+**GSE IDs:** "GSE201427","GSE166530","GSE162183","GSE186458"
+
+**Questions per GSE**: GSE201427
+
+  1. **What type of data is it?  Describe it.** (platform technology; e.g., high-throughput sequencing, array)
+  
+High-throughput sequencing (RNA-Seq) using Illumina HiSeq 4000
+  
+  2. **What disease or model is it using?** (infer from series title/summary/platform organism)
+
+SF3B1's role in tumor malignancy in Homo sapiens
+
+  3. **How many samples are there? What type of data is associated with the record?** 
+  
+There are 8 samples. There's an excel sheet in supplementary. 
+
+  4. **How many control and how many disease?** 
+  
+There are 3 samples associated with treatment and 5 samples associated with controls.
+
+  5.  **Can you find out any information about the GEO dataset - GSE264108. Why or Why not?
+
+Yes I can find information about the GSE264108. It is a high-throughput sequencing (bulk RNA-Seq) using Illumina HiSeq 2500 about breast cancer in 	Homo sapiens. There are 14 samples, 7 from healthy donors as control and 7 from disease
+
+**Questions per GSE**: GSE166530
+
+  1. **What type of data is it?  Describe it.** (platform technology; e.g., high-throughput sequencing, array)
+
+High-throughput sequencing (RNA-Seq) using Illumina NovaSeq 6000
+
+  2. **What disease or model is it using?** (infer from series title/summary/platform organism)
+
+COVID-19 in Homo sapiens
+
+  3. **How many samples are there? What type of data is associated with the record?** 
+
+there are 41 samples, there is a compressed .TAR file in supplementary. 
+
+  4. **How many control and how many disease?** 
+
+There are 3 control samples and 38 disease samples. 
+
+**Questions per GSE**: GSE162183
+
+  1. **What type of data is it?  Describe it.** (platform technology; e.g., high-throughput sequencing, array)
+
+High-throughput sequencing (Single-cell RNA-seq) using Illumina NovaSeq 6000 
+
+  2. **What disease or model is it using?** (infer from series title/summary/platform organism)
+  
+Psoriasis in Homo sapiens
+  
+  3. **How many samples are there? What type of data is associated with the record?** 
+
+6 samples, there is a .TAB and .LOOM file in supplementary. 
+
+  4. **How many control and how many disease?** 
+
+There are 3 control samples and 3 disease samples. 
+  
+**Questions per GSE**: GSE186458
+
+  1. **What type of data is it?  Describe it.** (platform technology; e.g., high-throughput sequencing, array)
+
+high-throughput sequencing (Whole-Genome Bisulfite Sequencing/WGBS) using Illumina NovaSeq 6000 for DNA methylation. 
+
+  2. **What disease or model is it using?** (infer from series title/summary/platform organism)
+  
+healthy Homo sapiens cells
+  
+  3. **How many samples are there? What type of data is associated with the record?** 
+  
+there are 253 samples
+  
+  4. **How many control and how many disease?** 
+  
+No control/disease, different type of study. 
+  
+  
+> Hint: Sample labels are not standardized. Use robust keyword detection (e.g., `control|normal|healthy|wild[- ]?type` vs. `tumou?r|cancer|patient|disease|mutant|treated`). Inspect a few GSM rows if the automatic inference is uncertain.
+
+
