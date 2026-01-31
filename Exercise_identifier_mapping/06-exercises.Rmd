@@ -1,0 +1,127 @@
+# Exercises
+
+These are intended to be done **after** completing the worked examples.
+
+```{r}
+library(biomaRt)
+library(knitr)
+library(dplyr)
+library(tibble)
+library(readxl)
+
+ensembl <- useMart("ensembl")
+```
+
+## Exercise 1 — https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE119732
+
+Using **GSE119732**, confirm whether the ID column contains Ensembl IDs with version suffixes.
+
+```{r}
+source("./fetch_geo_supp.R")
+fetch_geo_supp(gse = "GSE119732")
+
+files <- list.files(file.path("data", "GSE119732"), full.names = TRUE)
+raw_data <- readr::read_tsv(files[1])
+```
+
+1. Extract the first 20 IDs.
+
+```{r}
+raw_data<-raw_data[1:20,]
+```
+
+
+2. Count how many contain a `.`.
+
+```{r}
+sum(grepl("\\.", raw_data$gene_id))
+```
+
+
+3. Create a new column with versions stripped.
+
+```{r}
+stripped_data<-sub("\\..*$", "", raw_data$gene_id)
+
+raw_data$gene_id<-stripped_data
+```
+
+
+4. Map the identifiers to HGNC symbols.
+
+```{r}
+ensembl <- useEnsembl(biomart = "genes", dataset = "hsapiens_gene_ensembl")
+```
+
+```{r}
+id_map <- getBM(
+  attributes = c("ensembl_gene_id", "hgnc_symbol"),
+  filters = "ensembl_gene_id",
+  values = unique(raw_data$gene_id),
+  mart = ensembl
+)
+
+annotated_data <- left_join(raw_data, id_map, by = c("gene_id" = "ensembl_gene_id"))
+```
+
+## Exercise 2 — https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE122380
+
+Using **GSE122380**, confirm whether the ID column contains Ensembl IDs with version suffixes.
+
+```{r}
+source("./fetch_geo_supp.R")
+fetch_geo_supp(gse = "GSE122380")
+
+files <- list.files(file.path("data", "GSE122380"), full.names = TRUE)
+
+count_file <- files[grep("raw_counts", files)] # need to specify to grab the raw counts file
+raw_data_2 <- readr::read_table(count_file)
+```
+
+1. Extract the first 20 IDs.
+
+```{r}
+raw_data_2<-raw_data_2[1:20,]
+
+head(raw_data_2)
+```
+
+2. Create a new column with versions stripped.
+
+```{r}
+stripped_data_2<-sub("\\..*$", "", raw_data_2$Gene_id) # case sensitive 
+
+raw_data_2$Gene_id<-stripped_data_2
+```
+
+3. Map the identifiers to HGNC symbols.
+
+```{r}
+ensembl <- useEnsembl(biomart = "genes", dataset = "hsapiens_gene_ensembl")
+
+id_map_2 <- getBM(
+  attributes = c("ensembl_gene_id", "hgnc_symbol"),
+  filters = "ensembl_gene_id",
+  values = raw_data_2$Gene_id,
+  mart = ensembl)
+```
+
+```{r}
+annotated_data_2 <- left_join(raw_data_2, id_map_2, by = c("Gene_id" = "ensembl_gene_id"))
+
+view(annotated_data_2$hgnc_symbol)
+```
+
+4. What is different about this file?
+
+There were two supplementary files, one in excel format and other in text. I needed to specify R to grab the text one containing raw counts as excel one was not suitable for downstream analysis and often had issues with being converted into dataframe.  
+
+
+## Exercise 3 - 
+ 
+Can you use the worked example to process the above two GEO records?  How?
+
+Yes the worked example can be used for GSE119732 as it only contains a text file and also for for GSE122380, it contains an additional .xlsx file but file_grep ("\\.txt.gz$|\\.tsv.gz$|\\.csv.gz$") will only grab the .txt one keeping the overall approach sound. 
+
+
+
