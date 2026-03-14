@@ -1,0 +1,781 @@
+---
+title: "GSE240722 - CD73 in Fusion-Negative Rhabdomyosarcoma: Data Cleaning, Normalization, & Differential Expression"
+author: "Thakkar Neyo (1008349629)"
+date: "9th February, 2026"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    theme: cosmo
+    code_folding: hide
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width  = 8,
+  fig.height = 5
+)
+```
+
+# 1. Introduction {#intro}
+
+## 1.1 Dataset Overview {#why-dataset}
+
+[GSE240722](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE240722) (Hernandez et al., 2024) is a bulk RNA-Seq dataset looking at signaling pathways found in fusion-negative rhabdomyosarcoma (FN-RMS), a form of soft tissue cancer that lacks one main culprit, but is rather suspected to have a myriad of things going wrong in cell. The authors used shRNA to knock down CD73, a protein suspected of involvement in a patient-derived FN-RMS cell line.
+
+Rhabdomyosarcoma (RD) is the most common soft tissue sarcoma in kids and teens, and FN-RMS makes up more than 80% of cases. Hernandez et al. found that CD73, a membrane enzyme responsible for converting adenosine monophosphate into adenosine outside the cell, results in a downstream signaling cascade that makes cells grow and move faster while stopping them from differentiating into muscle, and is regulated by transcription factor TWIST2 (Hernandez et al., 2024). This study was done to better understand their roles and finding a potential therapeutic target.
+
+
+# 2. Experimental Design {#exp-design}
+
+The authors used a doxycycline (Dox)-inducible shRNA system. Lentiviral vectors encoding two independent shRNA constructs (sh1 and sh2) targeting the 3′UTR of CD73 were transduced into RD cells. There are 6 control samples containing uninduced RD cells with normal CD73 expression and 6 samples with CD73 knockdown (3 per shRNA construct), for a total of 12 samples.
+
+| Group | Treatment | Description | Samples |
+|:------|:----------|:------------|:--------|
+| Control | No Dox | Uninduced - normal CD73 expression | 6 (3 per shRNA) |
+| CD73^KD^ | Dox-treated | shRNA induced - CD73 knockdown | 6 (3 per shRNA) |
+
+RNA-Seq was done on the NextSeq 550. The gene count matrix was provided in supplementary with gene symbols as identifiers.
+
+# 3. Setup and Data Download {#setup}
+
+All analyses were performed in RStudio (R Core Team, 2024).
+
+```{r packages}
+if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+
+if (!requireNamespace("GEOquery", quietly = TRUE)) BiocManager::install("GEOquery", ask = FALSE, update = FALSE)
+if (!requireNamespace("biomaRt", quietly = TRUE)) BiocManager::install("biomaRt", ask = FALSE, update = FALSE)
+if (!requireNamespace("edgeR", quietly = TRUE))   BiocManager::install("edgeR", ask = FALSE, update = FALSE)
+if (!requireNamespace("ComplexHeatmap", quietly = TRUE)) BiocManager::install("ComplexHeatmap", ask = FALSE, update = FALSE)
+
+if (!requireNamespace("dplyr", quietly = TRUE))     install.packages("dplyr")
+if (!requireNamespace("ggplot2", quietly = TRUE))   install.packages("ggplot2")
+if (!requireNamespace("knitr", quietly = TRUE))     install.packages("knitr")
+if (!requireNamespace("tibble", quietly = TRUE))    install.packages("tibble")
+if (!requireNamespace("stringr", quietly = TRUE))   install.packages("stringr")
+if (!requireNamespace("R.utils", quietly = TRUE))   install.packages("R.utils")
+if (!requireNamespace("DT", quietly = TRUE))        install.packages("DT")
+if (!requireNamespace("gridExtra", quietly = TRUE)) install.packages("gridExtra")
+if (!requireNamespace("scales", quietly = TRUE))    install.packages("scales")
+if (!requireNamespace("circlize", quietly = TRUE))  install.packages("circlize")
+if (!requireNamespace("ggrepel", quietly = TRUE))   install.packages("ggrepel")
+if (!requireNamespace("tidyr", quietly = TRUE))     install.packages("tidyr")
+if (!requireNamespace("forcats", quietly = TRUE)) install.packages("forcats")
+```
+
+```{r libraries}
+library(GEOquery) 
+library(biomaRt)   
+library(edgeR)   
+library(ComplexHeatmap) 
+library(circlize) 
+library(dplyr) # (Wickham et al., 2023) 
+library(tidyr) # (Wickham et al., 2024) 
+library(forcats) # (Wickham et al., 2024) 
+library(ggplot2)  
+library(knitr)
+library(tibble) # (Müller et al., 2023)
+library(stringr) # (Wickham et al., 2022) 
+library(DT)
+library(gridExtra) # (Auguie et al., 2017)
+library(scales) # (Wickham et al., 2022) 
+library(ggrepel)
+```
+
+All figures use the colourblind accessible palette (Okabe et al, 2008) Interactive tables are rendered with DT (Xie et al., 2024). Data wrangling used tidyverse packages (Wickham et al., 2019).
+
+```{r palette}
+cb <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442","#0072B2", "#D55E00", "#CC79A7", "#999999")
+```
+
+# 4. Download and Load Data
+
+Download the supplementary count file from GEO using GEOquery (Davis & Meltzer, 2007).
+
+```{r download}
+supp_files <- getGEOSuppFiles("GSE240722")
+count_file_path <- rownames(supp_files)[
+    grep("gene.count", rownames(supp_files))]
+
+gene_counts <- read.table(count_file_path,
+                          header = TRUE, row.names = 1, sep = "\t")
+
+# save the raw count for before/after comparisons later
+n_raw <- nrow(gene_counts)
+```
+
+## 4.1 Raw Data
+
+The raw count matrix has 12 samples that follow the following the naming convention: `i-Sh{1,2}-NT5E-{D,ND}-{1,2,3}_S*`. Where **D** means Dox-treated (CD73 knockdown) and **ND** means No Dox (control). Both shRNA constructs target the same gene so they are combined for increased statistical significance with 6 treatment vs 6 control.
+
+```{r}
+datatable(
+  gene_counts,
+  caption  = "Table 1 - Raw count matrix",
+  options  = list(pageLength = 5, scrollX = TRUE),
+  rownames = TRUE
+)
+```
+
+## 4.2 Initial Look {#assess}
+
+A look at the raw data and some summary statistics to make sure nothing looks obviously wrong before cleaning.
+
+```{r}
+cat(sprintf("Genes with zero counts across ALL samples: %d\n",
+            sum(rowSums(gene_counts) == 0)))
+```
+
+```{r}
+sample_stats <- tibble(
+  Sample     = colnames(gene_counts),
+  Total_Count = colSums(gene_counts),
+  Genes_Detected = colSums(gene_counts > 0),
+  Median_Count   = apply(gene_counts, 2, median),
+)
+
+datatable(
+  sample_stats,
+  caption  = "Table 2 - summary statistics of every sample",
+  options  = list(pageLength = 12, dom = "t"),
+  rownames = FALSE
+) %>% DT::formatRound(columns = c("Total_Count", "Genes_Detected"), # adds the thousands separator (comma)
+                      digits = 0)
+```
+
+
+## 4.3 Remove Summary Rows
+
+The last 5 rows start with `__` (like `__no_feature`, `__ambiguous`, etc.) are summary stats, not actual genes, so they are removed before any actual analysis is conducted.
+
+```{r remove_htseq}
+gene_counts <- gene_counts[1:(n_raw - 5), ]
+n_raw <- n_raw - 5
+cat(sprintf("Genes after removing HTSeq rows: %d\n", nrow(gene_counts)))
+```
+
+
+# 5. Sample Metadata {#metadata}
+
+Parse sample information directly from the column names before any filtering or normalization can occur.
+
+```{r metadata}
+sample_info <- tibble(sample = colnames(gene_counts)) %>%
+  mutate(
+    shRNA     = ifelse(grepl("Sh2", sample, ignore.case = TRUE), "sh2", "sh1"),
+    condition = ifelse(grepl("\\.ND\\.", sample), "Control", "CD73KD"),
+    group     = paste0(condition, ".", shRNA)
+  )
+
+sample_info$condition <- factor(sample_info$condition,
+                                levels = c("Control", "CD73KD")) # Treats control as the baseline
+sample_info$shRNA     <- factor(sample_info$shRNA)
+
+```
+
+## 5.1 Renaming Samples for Clarity
+
+```{r rename_samples}
+# readable names for plots and tables
+sample_info <- sample_info %>%
+  mutate(label = paste0(condition, "_", shRNA, "_", row_number()),
+         .by = c(condition, shRNA))
+
+# rename columns in the count matrix to match
+colnames(gene_counts) <- sample_info$label
+```
+
+# 6. Filtering and Normalization {#filter-norm}
+
+Genes with very low counts across all samples have no statistical significance are removed using edgeR's `filterByExpr()` (Chen et al., 2016; Robinson et al., 2010), it keeps genes with enough counts in the smallest group size (in this case its 3 replicates per condition × 2 shRNA combination).
+
+```{r build_dge}
+dge <- DGEList(counts = as.matrix(gene_counts),
+               group  = sample_info$condition)
+
+# CPM saved for comparison of before vs after later
+pre_logcpm  <- cpm(dge, log = TRUE, prior.count = 1)
+n_pre       <- nrow(dge)
+```
+
+```{r filter}
+design <- model.matrix(~ shRNA + condition, data = sample_info) # the effect of Control vs. KD, but also which shRNA was used, was included after PCA showed there were off target effects due to construct differences.
+colnames(design) <- gsub("condition", "", colnames(design)) 
+
+keep <- filterByExpr(dge, design = design) # Where actual filtering takes place 
+dge  <- dge[keep, , keep.lib.sizes = FALSE]
+
+cat(sprintf("Before filtering: %d genes\n", n_pre))
+cat(sprintf("After filtering:  %d genes  (removed %d)\n",
+            nrow(dge), n_pre - nrow(dge)))
+```
+
+## 6.1 TMM Normalization {#normalization}
+
+Data normalization was done with **TMM (Trimmed Mean of M-values)** (Robinson et al., 2010). TMM essentially ignores the top & bottom 30% fold change pool and the top and bottom 5% that have the highest/lowest counts. It finds a middle ground to normalize all the data.
+
+The values are converted to **log2 CPM** (counts per million) for easier visualization. Gene-length normalization (TPM) was avoided as its unnecessary when comparing the **same gene across different conditions**.
+
+```{r normalize}
+dge <- calcNormFactors(dge, method = "TMM")
+
+norm_tbl <- tibble(
+  Sample     = colnames(dge),
+  Lib_Size   = dge$samples$lib.size,
+  Norm_Factor = round(dge$samples$norm.factors, 4)
+)
+
+datatable(norm_tbl,
+          caption = "Table 3 - Library sizes and TMM normalization factors",
+          options = list(pageLength = 12, dom = "t"),
+          rownames = FALSE)
+```
+
+```{r logcpm}
+logcpm <- cpm(dge, log = TRUE, prior.count = 1) # Converts them to logarithmic change and `prior.count = 1` argument adds a small amount to avoid log(0) errors. 
+```
+
+
+## 6.2 Before vs. After: Boxplots
+
+```{r boxplots, fig.cap="**Figure 1** - Normalization and filtering of genes: Boxplot comparison of distributions before (left) and after (right) quality control. edgeR’s filterByExpr() removed low-expression genes, removing the left-tail peak in the before. The data was normalized using Trimmed Mean of M-values (TMM). The x-axis represents individual biological samples; the y-axis represents expression levels in log2-Counts Per Million (CPM)."}
+par(mfrow = c(1, 2), mar = c(7, 4, 3, 1))
+boxplot(pre_logcpm, las = 2, cex.axis = 0.6,
+        main = sprintf("Before Filtering (%s genes)",
+                        format(n_pre, big.mark = ",")),
+        ylab = "log2-CPM", col = cb[2])
+boxplot(logcpm, las = 2, cex.axis = 0.6,
+        main = sprintf("After Filtering + TMM (%s genes)",
+                        format(nrow(dge), big.mark = ",")),
+        ylab = "log2-CPM", col = cb[3])
+par(mfrow = c(1, 1))
+```
+
+
+# 7. Quality Assessment and the shRNA Surprise {#pca-surprise}
+
+## 7.1 MDS Plot
+
+Multidimensional scaling (MDS) figure was created and computed using the edgeR function `plotMDS()` (Robinson et al., 2010).
+
+```{r mds, fig.cap="**Figure 2** - MDS plot of samples across CD73 knockdown constructs: Multidimensional scaling was done using edgeR’s plotMDS(). Axes represent the percentage of variance across samples by leading dimensions (Dim 1 and Dim 2). Controls are represented by blue, whereas CD73 knockdown is represented by orange. Different shRNA constructs are shaped as follows: circle for the first construct and triangle for the second shRNA construct. Arrows indicate the shift from control to knockdown for each construct. There is tight clustering of biological replicates, indicating the data is an actual biological event and replicable. While both constructs shift downward on Dim 2 (consistent CD73 knockdown effect), they diverge on Dim 1, suggesting there may be off-target activity by the constructs."}
+mds    <- plotMDS(dge, plot = FALSE)
+mds_df <- tibble(Dim1 = mds$x, Dim2 = mds$y,
+                 Condition = sample_info$condition,
+                 shRNA = sample_info$shRNA,
+                 Sample = sample_info$sample)
+
+# compute group centroids and build arrows from Control -> CD73KD
+centroids <- mds_df %>%
+  group_by(shRNA, Condition) %>%
+  summarise(Dim1 = mean(Dim1), Dim2 = mean(Dim2), .groups = "drop")
+
+arrows_df <- centroids %>%
+  group_by(shRNA) %>%
+  summarise(x    = Dim1[Condition == "Control"],
+            y    = Dim2[Condition == "Control"],
+            xend = Dim1[Condition == "CD73KD"],
+            yend = Dim2[Condition == "CD73KD"],
+            .groups = "drop")
+
+ggplot(mds_df, aes(Dim1, Dim2, colour = Condition, shape = shRNA)) +
+  geom_point(size = 4, stroke = 1.2) +
+  geom_segment(data = arrows_df,
+               aes(x = x, y = y, xend = xend, yend = yend),
+               inherit.aes = FALSE,
+               arrow = arrow(length = unit(0.2, "cm")),
+               linewidth = 1, colour = "grey30") +
+  geom_text(data = arrows_df,
+            aes(x = (x + xend)/2 + 0.15, y = (y + yend)/2,
+                label = shRNA),
+            inherit.aes = FALSE, size = 4, fontface = "bold") +
+  scale_colour_manual(values = cb[c(5, 6)]) +
+  labs(x = sprintf("Dim 1 (%.0f%%)", 100 * mds$var.explained[1]),
+       y = sprintf("Dim 2 (%.0f%%)", 100 * mds$var.explained[2]),
+       title = "MDS - CD73 Knockdown vs Control") +
+  theme_minimal(base_size = 13)
+```
+```{r mds_table}
+mds_coords <- mds_df %>%
+  arrange(Dim1) %>%
+  dplyr::select(Sample, Condition, shRNA, Dim1, Dim2)
+
+kable(mds_coords, digits = 1,
+      caption = "Table 4 - MDS coordinates for each sample")
+```
+
+### What the MDS shows 
+
+In each condition × shRNA subgroup, all of the the three biological replicates cluster extremely tightly. Suggesting this is actual biological event, as a result **no samples are removed**. The publication this dataset corresponds to also does not report on excluding any samples (Hernandez et al., 2024).
+
+The plot revealed an important anomaly at the shRNA construct level. The six control samples cluster together in the centre of Dim 1 (all between 0.4 and 0.6), but the knockdown samples push the transcriptome in opposite directions: **sh1 CD73KD moves left** (Dim 1 ≈ −2.2) while **sh2 CD73KD moves right** (Dim 1 ≈ +1.2). This is likely due to some genes being affected by  off-target effects of a particular construct rather than the intended CD73 loss itself. On Dim 2, both knockdowns shift downwards relative to controls (controls at +0.47 to +0.67, knockdowns at −0.9 to −0.23), showing an movement of transcriptome in similar directions.
+
+This changes our model design to: `~ shRNA + condition`. By including shRNA in the model, it removes the systematic construct effects between sh1 and sh2, and only tests for the condition effect (CD73KD vs Control) (see [Section 6](#filter-norm)).
+
+
+# 8. Dispersion Estimation {#dispersion}
+
+**biological coefficient of variation (BCV)** basically measures how much expression varies between replicates. Low BCV (< 0.1) means consistent replicates and high BCV (> 0.5) means there is significant biological noise across samples (Robinson et al., 2010).
+
+```{r dispersion}
+dge <- estimateDisp(dge, design, robust = TRUE)
+
+cat(sprintf("Common BCV: %.3f\n", sqrt(dge$common.dispersion)))
+```
+
+```{r bcv_plot, fig.cap="**Figure 3** - Biological Coefficient of Variation (BCV): Variation among samples was again estimated using edgeR’s BCV function. The square root of the common dispersion, red line, indicates a BCV = 0.176, indicating that on average the replicates differ by only 17.6%. The trend in blue indicates how the noise changes as log2-CPM increases on the x-axis. The dots represent individual genes, and the y-axis is the BCV, with higher values indicating more inconsistent gene levels."}
+plotBCV(dge, main = "Biological Coefficient of Variation")
+```
+
+
+# 9. Differential Expression {#de}
+
+## 9.1 Model and Test {#de-test}
+
+Differential expression was done using a quasi-likelihood F-test (Lund et al., 2012; McCarthy et al., 2012) within a generalized linear model framework (Robinson et al., 2010), blocking for shRNA construct identity to ignore the construct specific off-target effect and isolate the CD73 knockdown signal. 
+
+```{r fit}
+fit <- glmQLFit(dge, design, robust = TRUE) # GLM calculates the expected expression levels based on the negative binomial distribution and squeezes" individual estimates towards a common or pooled value. 
+qlf <- glmQLFTest(fit, coef = ncol(design)) # f-test compares the variation between the effect of your knockdown and the variation within the groups.
+
+de_all <- topTags(qlf, n = Inf, sort.by = "PValue")$table %>%
+  rownames_to_column("gene")
+```
+
+## 9.2 Apply Thresholds {#thresholds}
+
+A threshold of **FDR < 0.05** (Benjamini–Hochberg correction (Benjamini & Hochberg, 1995)) and **|log2 FC| > 1** (2-fold change) were applied, essentially due to large amount of genes, just by random chance ~5% of the genes will pass the quasi-likelihood F-test, resulting in false positives, so in order to counter that Benjamini–Hochberg FDR correction controls the expected proportion of false discoveries. The 2-fold change requirement is applied so focus is applied on biologically meaningful effect sizes.
+
+```{r apply_thresholds}
+de_results <- de_all %>%
+  mutate(
+    DE = case_when(
+      FDR < 0.05 & logFC >  1 ~ "Up in CD73KD",
+      FDR < 0.05 & logFC < -1 ~ "Down in CD73KD",
+      TRUE ~ "Not significant"
+    )
+  )
+
+de_summary <- de_results %>% count(DE) %>% arrange(desc(n))
+kable(de_summary, caption = "Table 5 - DE summary (FDR < 0.05, |logFC| > 1)")
+```
+
+### NT5E - the positive control
+
+NT5E (the gene encoding CD73) should be among the most downregulated genes as it was the intended knockdown target. This serves as a positive control.
+
+```{r check_nt5e}
+nt5e <- de_results %>% filter(gene == "NT5E")
+if (nrow(nt5e) > 0) {
+  cat(sprintf("NT5E: logFC = %.2f, FDR = %.2e, DE = %s\n",
+              nt5e$logFC, nt5e$FDR, nt5e$DE))
+}
+```
+
+## 9.3 Top DE Genes
+
+```{r de_table}
+de_sig <- de_results %>%
+  filter(DE != "Not significant") %>%
+  arrange(FDR) %>%
+  mutate(across(where(is.numeric), ~ signif(.x, 4)))
+
+datatable(
+  de_sig,
+  caption = "Table 6 - Significant DE genes (FDR < 0.05, |logFC| > 1)",
+  options = list(pageLength = 10, scrollX = TRUE),
+  rownames = FALSE
+)
+```
+
+
+# 10. Visualization {#viz}
+
+## 10.1 Volcano Plot
+
+```{r volcano, fig.cap="**Figure 4** - Differential expression of CD73 knockdown: Volcano plot with the x-axis: log2 Fold Change, and statistical significance shown by the y-axis: -log10 False Discovery Rate. The dotted lines are the significance thresholds (FDR < 0.05 and |log2FC| > 1). The significantly upregulated genes are colored in orange, and significantly downregulated genes are colored in blue, with the grey region representing genes that did not pass the threshold value. The top 10 genes by FDR are labeled with their HGNC symbols."}
+top_label <- de_results %>%
+  filter(DE != "Not significant") %>%
+  slice_min(FDR, n = 10)
+
+ggplot(de_results, aes(logFC, -log10(FDR), colour = DE)) +
+  geom_point(alpha = 0.5, size = 1.2) +
+  geom_point(data = top_label, size = 2.5) +
+  geom_text_repel(data = top_label, aes(label = gene),
+                  size = 3, max.overlaps = 20, colour = "black",
+                  segment.colour = "grey60") +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", colour = "grey40") +
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed", colour = "grey40") +
+  scale_colour_manual(values = c("Up in CD73KD" = cb[6],
+                                  "Down in CD73KD" = cb[5],
+                                  "Not significant" = "grey75")) +
+  labs(x = expression(log[2]~"FC (CD73"^KD~"/ Control)"),
+       y = expression(-log[10]~FDR),
+       title = "Volcano Plot - DE Genes",
+       colour = NULL) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "top")
+```
+
+## 10.2 MA Plot
+
+```{r ma, fig.cap="**Figure 5** - Mean-Difference (MA) plot of differential expression: The trend between average expression level in log-CPM on the x-axis and relative change (log2 Fold Change) on the y-axis. The non-significant genes are colored in grey. Differentially expressed genes are highlighted by their direction and color: orange being upregulated and blue being downregulated. The significance is defined by FDR < 0.05 and |log2FC| > 1."}
+ggplot(de_results, aes(logCPM, logFC, colour = DE)) +
+  geom_point(alpha = 0.4, size = 1) +
+  geom_hline(yintercept = 0, linewidth = 0.5) +
+  scale_colour_manual(values = c("Up in CD73KD" = cb[6],
+                                  "Down in CD73KD" = cb[5],
+                                  "Not significant" = "grey80")) +
+  labs(x = "Average log-CPM", y = expression(log[2]~FC),
+       title = "MA Plot - CD73 Knockdown vs Control", colour = NULL) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "top")
+```
+
+## 10.3 Heatmap of Top DE Genes
+
+```{r heatmap, fig.width=9, fig.height=10, fig.cap="**Figure 6** - Heatmap containing top 50 differentially expressed genes: The 50 most significant genes by FDR are presented as Z-scores of TMM-normalized log2-CPM values. Higher Z-scores correspond to overexpression and higher orange intensity, and lower Z-scores correspond to more underexpression and blue intensity in the given condition. The first column annotation indicates the experimental condition: control in blue vs. knockdown in orange, and the second annotation includes the specific shRNA construct used: yellow for sh1 and green for sh2."}
+top50 <- de_results %>%
+  filter(DE != "Not significant") %>%
+  slice_min(FDR, n = 50) %>%
+  pull(gene)
+
+hm_scaled <- t(scale(t(logcpm[top50, ])))
+
+col_anno <- HeatmapAnnotation(
+  Condition = sample_info$condition,
+  shRNA     = sample_info$shRNA,
+  col = list(Condition = c("Control" = cb[5], "CD73KD" = cb[6]),
+             shRNA     = c("sh1" = cb[1], "sh2" = cb[3]))
+)
+
+Heatmap(hm_scaled,
+        name = "Z-score",
+        col  = colorRamp2(c(-2, 0, 2), c(cb[5], "white", cb[6])),
+        top_annotation   = col_anno,
+        cluster_rows     = TRUE,
+        cluster_columns  = TRUE,
+        show_row_names   = TRUE,
+        show_column_names = TRUE,
+        row_names_gp     = gpar(fontsize = 7),
+        column_names_gp  = gpar(fontsize = 8),
+        column_title     = "Top 50 DE Genes")
+```
+
+The heatmap was generated with ComplexHeatmap (Gu et al., 2016) and circlize (Gu et al., 2014). Gene labels in the volcano plot use ggrepel (Slowikowski, 2024). Volcano and MA Plot used ggplot2 (Wickham, 2016)
+
+# 11. Mapping to HGNC Symbols {#mapping}
+
+The row identifiers are gene symbols from an unknown gene annotation. Ensembl was queried via biomaRt (Durinck et al., 2009) to verify which of the gene symbols are currently active HGNC symbols and get their respective Ensembl gene IDs. **The mapping was done after filtering** due to ranking difficulties of mapping between different biotypes, most of which are lowly expressed and will have already been removed in filtering process. 
+
+```{r ensembl}
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+```
+
+```{r query_hgnc}
+filtered_symbols <- rownames(dge)
+
+stash_file <- "hgnc_to_ensembl_filtered.rds"
+if (file.exists(stash_file)) {
+  hgnc_map <- readRDS(stash_file)
+} else {
+  hgnc_map <- getBM(
+    attributes = c("hgnc_symbol", "ensembl_gene_id",
+                    "gene_biotype", "chromosome_name"),
+    filters    = "hgnc_symbol",
+    values     = filtered_symbols,
+    mart       = ensembl
+  )
+  saveRDS(hgnc_map, stash_file)
+}
+```
+
+## 11.1 Mapping Summary {#unmapped}
+
+```{r mapping_stats}
+mapped   <- unique(hgnc_map$hgnc_symbol)
+unmapped <- filtered_symbols[!filtered_symbols %in% mapped]
+
+mapping_tbl <- tibble(
+  Category = c("Genes after filtering", "Mapped (valid HGNC)", "Unmapped"),
+  Count    = c(length(filtered_symbols), length(mapped), length(unmapped)),
+  Percent  = sprintf("%.1f%%", 100 * Count / length(filtered_symbols))
+)
+
+kable(mapping_tbl, caption = "Table 7 - HGNC mapping summary")
+```
+
+**`r length(unmapped)`** genes could not map to a current HGNC database. It represents approximately **`r sprintf("%.1f%%", 100 * length(unmapped) / length(filtered_symbols))`** of the dataset. However, before discarding them completely, a check was done to see how many of the significant DE genes were lost to this.
+
+```{r de_loss_check}
+de_unmapped <- de_sig %>% filter(!gene %in% mapped)
+
+datatable(
+  de_unmapped %>% dplyr::select(gene, logFC, FDR, DE),
+  caption  = sprintf("Table 8 – %d significant DE genes lost in initial HGNC mapping",
+                      nrow(de_unmapped)),
+  options  = list(pageLength = 10, scrollX = TRUE),
+  rownames = FALSE
+)
+```
+
+## 11.2 Rescuing {#rescue}
+
+Many of the unmapped symbols are have older official names that have been updated by HGNC. biomaRt's `external_synonym` filter is used to look up current HGNC symbols for the unmapped genes. Only **unambiguous** aliases (mapping to exactly one current symbol) that do not have any conflicts with a symbol already present in the dataset are kept.
+
+```{r alias_query}
+# Query biomaRt for alias to current links
+alias_link_stash <- "alias_link.rds"
+if (file.exists(alias_link_stash)) {
+  alias_link <- readRDS(alias_link_stash)
+} else {
+  alias_link <- getBM(
+    attributes = c("external_synonym", "hgnc_symbol"),
+    filters    = "external_synonym",
+    values     = unmapped,
+    mart       = ensembl
+  )
+  saveRDS(alias_link, alias_link_stash)
+}
+```
+
+```{r alias_filter}
+# Keep only unambiguous aliases (one old name -> one current symbol)
+alias_unique <- alias_link %>%
+  filter(hgnc_symbol != "") %>%
+  group_by(external_synonym) %>%
+  filter(n_distinct(hgnc_symbol) == 1) %>%
+  ungroup() %>%
+  distinct(external_synonym, hgnc_symbol)
+
+# Avoid aliases that resolve to a symbol already present in our dataset, as that would create a merge conflict
+alias_unique <- alias_unique %>%
+  filter(!hgnc_symbol %in% rownames(dge))
+
+cat(sprintf("Unmapped symbols queried:   %d\n", length(unmapped)))
+cat(sprintf("Rescued (unambiguous, no conflicts): %d\n", nrow(alias_unique)))
+cat(sprintf("Still unmapped after rescue: %d\n",
+            length(unmapped) - nrow(alias_unique)))
+```
+
+```{r alias_examples}
+kable(head(alias_unique, 15),
+      col.names = c("Old Symbol", "Current HGNC Symbol"),
+      caption   = "Table 9 – Examples of rescued aliases")
+```
+
+```{r alias_rename}
+# Rename rescued aliases in the DGEList
+rename_vec   <- setNames(alias_unique$hgnc_symbol, alias_unique$external_synonym)
+current_rows <- rownames(dge)
+rescued_idx  <- current_rows %in% names(rename_vec)
+current_rows[rescued_idx] <- rename_vec[current_rows[rescued_idx]]
+rownames(dge) <- current_rows
+
+# Pull Ensembl info for the rescued symbols and add it to hgnc_map
+rescued_info_stash <- "rescued_info.rds"
+if (file.exists(rescued_info_stash)) {
+  rescued_info <- readRDS(rescued_info_stash)
+} else {
+  rescued_info <- getBM(
+    attributes = c("hgnc_symbol", "ensembl_gene_id",
+                    "gene_biotype", "chromosome_name"),
+    filters    = "hgnc_symbol",
+    values     = alias_unique$hgnc_symbol,
+    mart       = ensembl
+  )
+  saveRDS(rescued_info, rescued_info_stash)
+}
+
+hgnc_map <- bind_rows(hgnc_map, rescued_info)
+
+# Update 
+mapped        <- unique(hgnc_map$hgnc_symbol)
+unmapped_final <- rownames(dge)[!rownames(dge) %in% mapped]
+
+mapping_tbl_updated <- tibble(
+  Category = c("Rescued via alias",
+               "Total mapped",
+               "Still unmapped"),
+  Count    = c(nrow(alias_unique),
+               sum(rownames(dge) %in% mapped),
+               length(unmapped_final)),
+  Percent  = sprintf("%.1f%%", 100 * Count / length(filtered_symbols))
+)
+
+kable(mapping_tbl_updated, caption = "Table 10 – Updated HGNC mapping summary after alias rescue")
+```
+
+The remaining **`r length(unmapped_final)`** unmapped symbols are excluded from the final dataset as they lack verified HGNC symbols.
+
+## 11.3 Handling Duplicates {#duplicates}
+
+Some HGNC symbols map to multiple Ensembl gene IDs, this is typically due to Ensembl including copies on alternative scaffolds. These alt scaffolds are haplotype block regions and are highly variable, as a result they are removed. For any remaining duplicates, protein coding ones are prioritized and in cases where there are two protein coding, alphabetical ascending ones are for reproducibility.
+
+```{r dedup}
+primary_chrs <- c(as.character(1:22), "X", "Y", "MT")
+
+n_before <- nrow(hgnc_map)
+hgnc_map <- hgnc_map %>% filter(chromosome_name %in% primary_chrs)
+cat(sprintf("Alt scaffold entries removed: %d\n", n_before - nrow(hgnc_map)))
+
+# count remaining duplicates
+n_dup <- hgnc_map %>%
+  group_by(hgnc_symbol) %>% filter(n() > 1) %>%
+  pull(hgnc_symbol) %>% n_distinct()
+
+# resolve: prefer protein_coding, then alphabetical
+hgnc_unique <- hgnc_map %>%
+  mutate(pc = as.integer(gene_biotype == "protein_coding")) %>%
+  arrange(hgnc_symbol, desc(pc), ensembl_gene_id) %>%
+  distinct(hgnc_symbol, .keep_all = TRUE) %>%
+  dplyr::select(-pc)
+```
+
+## 11.4 Final Gene Set {#coverage}
+
+```{r final_set}
+keep_mapped <- rownames(dge) %in% hgnc_unique$hgnc_symbol
+dge_mapped  <- dge[keep_mapped, , keep.lib.sizes = FALSE]
+logcpm_final <- cpm(dge_mapped, log = TRUE, prior.count = 1)
+
+cat(sprintf("Final: %d genes × %d samples\n",
+            nrow(logcpm_final), ncol(logcpm_final)))
+cat(sprintf("Coverage: %.1f%% of post-filtering genes\n",
+            100 * nrow(logcpm_final) / length(filtered_symbols)))
+cat(sprintf("Overall: %.1f%% of %s raw genes\n",
+            100 * nrow(logcpm_final) / n_raw, format(n_raw, big.mark = ",")))
+```
+
+## 11.5 Biotype Composition
+
+```{r biotype, fig.cap="**Figure 7** - Biotype distribution of mapped genes: Bar chart showing the overall biotype of the final dataset. The x-axis indicates the number of unique genes in their respective category, and the y-axis represents the biotype. The high amount of protein-coding genes is due to priority given to it during the mapping process."}
+hgnc_unique %>%
+  filter(hgnc_symbol %in% rownames(logcpm_final)) %>%
+  count(gene_biotype) %>%
+  mutate(gene_biotype = fct_reorder(gene_biotype, n)) %>%
+  ggplot(aes(gene_biotype, n, fill = gene_biotype)) +
+  geom_col(show.legend = FALSE, width = 0.7) +
+  geom_text(aes(label = n), hjust = -0.2, size = 3.5) +
+  scale_fill_manual(values = rep(cb, length.out = 15)) +
+  coord_flip() +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+  labs(title = "Gene Biotype Composition", x = NULL, y = "Count") +
+  theme_minimal()
+```
+
+
+# 12. Final Expression Matrix {#final-matrix}
+
+Final dataframe with numeric columns and unique HUGO symbols as rownames.
+
+```{r final_matrix}
+final_expr <- as.data.frame(logcpm_final)
+
+cat(sprintf("Final matrix: %d genes × %d samples\n",
+            nrow(final_expr), ncol(final_expr)))
+cat(sprintf("Unique HUGO rownames: %s\n", !any(duplicated(rownames(final_expr)))))
+cat(sprintf("All numeric columns:  %s\n", all(sapply(final_expr, is.numeric))))
+```
+
+```{r final_preview}
+datatable(final_expr,
+          caption = "Table 11 - Final normalized expression matrix",
+          options = list(pageLength = 5, scrollX = TRUE))
+```
+
+
+# 13. Conclusion {#conclusion}
+
+The differential expression analysis of GSE240722 dataset yielded a final processed matrix consisting of 14265 verified HGNC genes across 12 samples, with 95.6%% of the genes successfully mapping after filtering.
+
+It started with a simple look-up of sarcoma-based studies on GEO; then filtering was applied based on minimum samples, requirement of count matrix, and recency (< 5 years). GSE240722 was selected due to it targeting transcriptomic changes of patient-derived cells affected with fusion-negative rhabdomyosarcoma when treated with different shRNA constructs that lead to CD73 knockdown, all while having 12 total samples (6 controls and 6 shRNA knockdowns).
+
+The process followed filtering of lowly expressed genes, TMM normalization, quasi-likelihood F-test within a generalized linear model, then applying Benjamini–Hochberg correction & 2-fold change requirement, and ending it with HGNC symbol mapping via biomaRt.
+
+The MDS analysis showed how each independent shRNA construct had off-target effects. However, the noise from these constructs was accounted for within the model through ~ shRNA + condition, and 681 high-confidence DE genes were identified in response to CD73 loss.
+
+The significant downregulation of NT5E (CD73 gene) was treated as a positive control, not only for the experimental knockdown but also for the DE analysis pipeline. The role of top differentially expressed genes will be explored in upcoming assignments using databases such as KEGG or GO to help better understand the role of CD73 in pediatric sarcomas
+
+# Assignment Questions {#questions}
+
+| # | Question | Section |
+|:-:|:---------|:--------|
+| 1 | Why is the dataset of interest? | [Section 1.1 - Why This Dataset](#why-dataset) |
+| 2 | Control/test conditions and sample counts? | [Section 2 - Experimental Design](#exp-design) |
+| 3 | Non-unique expression values? | [Section 11.2 - Handling Duplicates](#duplicates) |
+| 4 | Unmapped HUGO symbols? | [Section 11.1 - Mapping Summary](#unmapped) |
+| 5 | Outliers? | [Section 7.1 - MDS Plot](#pca-surprise) (no outliers removed) |
+| 6 | How were replicates handled? | [Section 2 - Experimental Design](#exp-design) |
+| 7 | Final coverage? | [Section 11.3 - Final Gene Set](#coverage) |
+| 8 | Normalization method and why? | [Section 6.1 - TMM Normalization](#normalization) |
+| 9 | Statistical test, thresholds, multiple testing? | [Section 9.2 - Apply Thresholds](#thresholds) |
+
+
+# Session Info
+
+```{r session}
+sessionInfo()
+```
+
+
+# References
+
+Benjamini, Y., & Hochberg, Y. (1995). Controlling the False Discovery Rate: A Practical and Powerful Approach to Multiple Testing. Journal of the Royal Statistical Society. Series B (Methodological), 57(1), 289–300. http://www.jstor.org/stable/2346101
+
+Chen, Y., Lun, A. T. L., & Smyth, G. K. (2016). From reads to genes to pathways: Differential expression analysis of RNA-Seq experiments using Rsubread and the edgeR quasi-likelihood pipeline. *F1000Research*, *5*, 1438. https://doi.org/10.12688/f1000research.8987.2
+
+Davis, S., & Meltzer, P. S. (2007). GEOquery: A bridge between the Gene Expression Omnibus (GEO) and BioConductor. *Bioinformatics*, *23*(14), 1846–1847. https://doi.org/10.1093/bioinformatics/btm254
+
+Durinck, S., Spellman, P. T., Birney, E., & Huber, W. (2009). Mapping identifiers for the integration of genomic datasets with the R/Bioconductor package biomaRt. *Nature Protocols*, *4*(8), 1184–1191. https://doi.org/10.1038/nprot.2009.97
+
+Gu, Z., Eils, R., & Schlesner, M. (2016). Complex heatmaps reveal patterns and correlations in multidimensional genomic data. *Bioinformatics*, *32*(18), 2847–2849. https://doi.org/10.1093/bioinformatics/btw313
+
+Gu, Z., Gu, L., Eils, R., Schlesner, M., & Brors, B. (2014). circlize implements and enhances circular visualization in R. *Bioinformatics*, *30*(19), 2811–2812. https://doi.org/10.1093/bioinformatics/btu393
+
+Hernandez, K. C., Shah, A. M., Lopez, V. A., Tagliabracci, V. S., Chen, K., Xu, L., Bassel-Duby, R., Olson, E. N., & Liu, N. (2024). CD73 contributes to the pathogenesis of fusion-negative rhabdomyosarcoma through the purinergic signaling pathway. *Proceedings of the National Academy of Sciences*, *121*(4), e2315925121. https://doi.org/10.1073/pnas.2315925121
+
+Lund, S. P., Nettleton, D., McCarthy, D. J., & Smyth, G. K. (2012). Detecting differential expression in RNA-sequence data using quasi-likelihood with shrunken dispersions. *Statistical Applications in Genetics and Molecular Biology*, *11*(5), Article 8. https://doi.org/10.1515/1544-6115.1826
+
+McCarthy, D. J., Chen, Y., & Smyth, G. K. (2012). Differential expression analysis of multifactor RNA-Seq experiments with respect to biological variation. *Nucleic Acids Research*, *40*(10), 4288–4297. https://doi.org/10.1093/nar/gks042
+
+R Core Team. (2024). *R: A language and environment for statistical computing*. R Foundation for Statistical Computing. https://www.R-project.org/
+
+Robinson, M. D., McCarthy, D. J., & Smyth, G. K. (2010). edgeR: A Bioconductor package for differential expression analysis of digital gene expression data. *Bioinformatics*, *26*(1), 139–140. https://doi.org/10.1093/bioinformatics/btp616
+
+Wickham, H. (2016). *ggplot2: Elegant graphics for data analysis* (2nd ed.). Springer-Verlag. https://doi.org/10.1007/978-3-319-24277-4
+
+Wickham, H., Averick, M., Bryan, J., Chang, W., McGowan, L. D., François, R., Grolemund, G., Hayes, A., Henry, L., Hester, J., Kuhn, M., Pedersen, T. L., Miller, E., Bache, S. M., Müller, K., Ooms, J., Robinson, D., Seidel, D. P., Spinu, V., … Yutani, H. (2019). Welcome to the tidyverse. *Journal of Open Source Software*, *4*(43), 1686. https://doi.org/10.21105/joss.01686
+
+Xie, Y., Cheng, J., & Tan, X. (2024). *DT: A wrapper of the JavaScript library 'DataTables'*. R package version 0.33. https://CRAN.R-project.org/package=DT
+
+Okabe, M., & Ito, K. (2008). Color universal design (CUD): How to make figures and presentations that are friendly to colorblind people. https://jfly.uni-koeln.de/color/#pallet (Original work published 2002)
+
+Slowikowski, K. (2024). *ggrepel: Automatically position non-overlapping text labels with 'ggplot2'*. R package version 0.9.6. https://CRAN.R-project.org/package=ggrepel
+
+Wickham, H., François, R., Henry, L., Müller, K., & Vaughan, D. (2023). *dplyr: A grammar of data manipulation*. R package version 1.1.4. https://CRAN.R-project.org/package=dplyr
+
+Wickham, H., Vaughan, D., & Girlich, M. (2024). *tidyr: Tidy messy data*. R package version 1.3.1. https://CRAN.R-project.org/package=tidyr
+
+Wickham, H. (2023). *forcats: Tools for working with categorical variables*. R package version 1.0.0. https://CRAN.R-project.org/package=forcats
+
+Wickham, H. (2022). *stringr: Simple, consistent wrappers for common string operations*. R package version 1.5.1. https://CRAN.R-project.org/package=stringr
+
+Müller, K., & Wickham, H. (2023). *tibble: Simple data frames*. R package version 3.2.1. https://CRAN.R-project.org/package=tibble
+
+Wickham, H., & Seidel, D. (2022). *scales: Scale functions for visualization*. R package version 1.3.0. https://CRAN.R-project.org/package=scales
+
+Auguie, B. (2017). *gridExtra: Miscellaneous functions for "grid" graphics*. R package version 2.3. https://CRAN.R-project.org/package=gridExtra
+
+Bengtsson, H. (2024). *R.utils: Various programming utilities*. R package version 2.12.3. https://CRAN.R-project.org/package=R.utils
+
+
+# Journal Entry 
+
+All Journal Entries can be viewed on github: https://github.com/bcb420-2026/Neyo_Thakkar/wiki

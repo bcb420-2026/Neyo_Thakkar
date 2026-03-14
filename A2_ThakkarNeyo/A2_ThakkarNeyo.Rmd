@@ -1,0 +1,327 @@
+---
+title: "Enrichment Analysis CD73 in Fusion-Negative Rhabdomyosarcoma"
+author: "Thakkar Neyo (1008349629)"
+date: "14th March, 2026"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    theme: cosmo
+    code_folding: hide
+    df_print: paged
+---
+
+# 1. Introduction {#intro}
+
+In A1 I chose the dataset [GSE240722](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE240722), a bulk RNA-Seq dataset studying the effects of knockdown of CD73 in fusion- negative rhabdomyosarcoma (Hernandez et al., 2024). CD73 is an inner leaflet membrane bound enzyme that hydrolyzes AMP (adenosine monophosphate) into adenosine, leading to numerous downstream signaling, a route often exploited in cancer to help with tumor growth. The differential expression analysis showcased a 681 HGNC verified genes that passed the FDR < 0.05 and|logFC| > 1 threshold and final dataset having 14,265 genes. In this report, these transcriptomic changes are functionally analyzed through two complementary computational methods: a thresholded Over-Representation Analysis (ORA) using the g:Profiler web interface (Kolberg et al., 2023), and a non-thresholded Gene Set Enrichment Analysis (GSEA) using the GSEA Java desktop software (Subramanian et al., 2005). Finally the non-thresholded changes in pathways were visualized and grouped through Cytoscape (Shannon et al., 2003). 
+
+## 1.1 Summary of A1 {#a1-summary}
+
+| Step | Detail |
+|:-----|:-------|
+| Thresholds | FDR < 0.05 (Benjamini–Hochberg), \|log~2~FC\| > 1 |
+| DE genes | 681 significant (HGNC-verified) |
+| Final mapped genes | 14,265 genes with verified HGNC symbols |
+
+```{r a1-run, include=FALSE}
+# Silently execute A1 code to create objects needed by A2
+# (de_sig, de_results, mapped, dge, logcpm, sample_info, etc.)
+tmp_r <- tempfile(fileext = ".R")
+knitr::purl("A1_ThakkarNeyo.Rmd", output = tmp_r, quiet = TRUE)
+source(tmp_r, local = knitr::knit_global())
+unlink(tmp_r)
+```
+
+# 2. Threshold Based Analysis Using g:Profiler {#gprofiler}
+
+First a text file containing all the 681 genes that passed the FDR < 0.05, |logFC| > 1 threshold was saved locally. Since g:profiler accepts HGNC symbols there was no need to go back to ensambl ids. 
+
+```{r}
+de_sig_g_profiler<-de_sig$gene
+
+write.table(de_sig_g_profiler, file = "all_significant_genes.txt", 
+            quote = FALSE, row.names = FALSE, col.names = FALSE)
+```
+
+All of the 681 genes from the text file were then copy pasted into g:GOSt (Kolberg et al., 2023) with the following parameters, the version and date of query are also listed:
+
+```{r}
+
+# Organism: Humans (Homo Sapiens)
+
+# Significance Threshold: Benjamini-Hochberg (<0.05)
+
+# Checked off:
+# GO biological process (Ashburner et al., 2000; Gene Ontology Consortium, 2021)
+# No electronic GO annotations
+# Reactome (Gillespie et al., 2024)
+# WikiPathways (Martens et al., 2021)
+
+# Ensambl ids with most go annotations were selected  
+
+# version: e113_eg59_p19_6be52918
+# date: 3/13/2026, 7:43:03 PM
+# organism: hsapiens
+```
+
+# 3. Over-Representation Analysis {#ora}
+
+Over representation analysis was done using  g:GOSt in g:Profiler (Kolberg et al., 2023). g:Profiler was used due to its ease of access: A list of significantly differentially expressed genes that passed False Discovery Rate FDR < 0.05 and a magnitude change of |logFC| > 1 were put through multiple databases in a single spot. It tries to find actual biological events rather than cherry-picking a dataset that may show a hit.
+
+The databases used for this were: Gene Ontology Biological Process (Ashburner et al., 2000; Gene Ontology Consortium, 2021), Reactome (Gillespie et al., 2024), and WikiPathways (Martens et al., 2021). Electronic GO annotations were removed to get results that are experimentally confirmed. A filtering for sizes between 5 and 200 genes was applied to remove any overly broad cell process or niche categories.
+
+```{r}
+g_profiler_output <- read.csv("gProfiler_hsapiens_3-13-2026_8-05-24 PM__intersections.csv", header = TRUE)
+
+datatable(
+  g_profiler_output,
+  caption = "Table 1 - Enrichment Analysis of Differentially Expressed Genes",
+  options = list(pageLength = 10, scrollX = TRUE),
+  rownames = FALSE
+)
+```
+
+Table 1. Enrichment Analysis of Differentially Expressed Genes. Gene set enrichment was performed using g:Profiler on the complete list of differentially expressed genes following CD73 knockdown (FDR < 0.05, |logFC| > 1, term size 5–200). The analysis showed 57  GO:BP terms and 6 Reactome pathways. The top terms were about  general connective tissue functions such as muscle contraction and cardiac/heart pathways affected by the experiment.
+
+## 3.1 Directional Analysis {#directional}
+
+Initially, the analysis was run using the entire combined list of differentially expressed genes (both up- and down-regulated). However, it only resulted in general biological processes in the connective tissues. In order to get a more directional answer the analysis was split into up-regulated and down-regulated sets of genes and run through g:Profiler with the same parameters independently.
+
+```{r}
+up_genes <- de_sig %>%
+  filter(DE == "Up in CD73KD") %>%
+  pull(gene)
+
+down_genes <- de_sig %>%
+  filter(DE == "Down in CD73KD") %>%
+  pull(gene)
+
+write.table(up_genes,
+            file = "upregulated_genes.txt",
+            quote = FALSE, row.names = FALSE, col.names = FALSE)
+
+write.table(down_genes,
+            file = "downregulated_genes.txt",
+            quote = FALSE, row.names = FALSE, col.names = FALSE)
+```
+
+```{r}
+g_profiler_upregulated <- read.csv("UPREGULATED_3-13-2026_8-24-29 PM__intersections.csv", header = TRUE)
+
+datatable(
+  g_profiler_upregulated,
+  caption = "Table 2 - Enrichment Analysis of Up-Regulated Genes After CD73 Knockdown",
+  options = list(pageLength = 10, scrollX = TRUE),
+  rownames = FALSE
+)
+```
+
+Table 2. Enrichment Analysis of Up-Regulated Genes After CD73 Knockdown: Over-representation analysis of isolated up-regulated genes (FDR < 0.05, |logFC| > 1, term size 5–200) gave 120 GO:BP terms. The top enriched pathways are muscle development & contraction, indicating a differentiation process occuring.
+
+
+```{r}
+g_profiler_downregulated <- read.csv("DOWNREGULATED_gProfiler_hsapiens_3-13-2026_8-22-52 PM.csv", header = TRUE)
+
+datatable(
+  g_profiler_downregulated,
+  caption = "Table 3 - Functional Enrichment Analysis of Down-Regulated Genes After CD73 Knockdown",
+  options = list(pageLength = 10, scrollX = TRUE),
+  rownames = FALSE
+)
+```
+
+Table 3. Functional Enrichment Analysis of Down-Regulated Genes After CD73 Knockdown. Over-representation analysis of isolated down-regulated genes (FDR < 0.05, |logFC| > 1, term size 5–200) identified 41 GO:BP terms. The top pathways are mostly downregulation of cell signaling and cellular adhesion.
+
+
+# 4. Interpretation and Literature {#interpretation-ora}
+
+The ORA findings align with the pathways identified in the original paper (Hernandez et al., 2024):
+
+FN-RMS is a tumor characterized by cells that are obstructed early in the skeletal muscle differentiation process, leading to swift proliferation and significant metastatic capability without maturation. Hernandez et al. demonstrated that reducing CD73 levels reinstates differentiation and diminishes pathways that promote metastasis.
+
+Our distinct enrichment outcomes offer standalone computational confirmation of this mechanism:
+
+Differentiation: Hernandez et al.'s initial RNA-seq analysis showed that terms such as muscle system processes and differentiation were upregulated after CD73 knockdown. This independent examination of solely thresholded up-regulated genes supports this: the most notable terms in upregulated were "myofibril assembly" and "development of striated muscle cells." This supports the credibility of their findings that inhibiting CD73 results in the FN-RMS cells to continue their development into organized muscle cells.
+
+Reduced Metastasis Likelihood: Hernandez et al. also indicated that CD73 knockdown lowers the likelihood of metastasis, by the downregulation of genes associated with extracellular matrix organization and cell adhesion. The independently down-regulated list also supports this, with pathways like "basement membrane organization" and "integrin-mediated signaling" being top downregulated. Integrins and interactions with the basement membrane are recognized as key factors in the metastasis of cancer cells. By reducing the activity of these pathways, the pace at which cancer metastasizes to other tissues diminishes (Ganguly et al., 2013).
+
+A study conducted by (Xue et al., 2022) looked at CD73 knockdown in Head and Neck Squamous Cell Carcinoma. They used both in vitro tests and in vivo experiments and arrived at a similar conclusion that inhibiting CD73 reduced tumor growth and spread carcinoma. 
+
+
+# 5. Non-Thresholded GSEA Analysis {#gsea}
+
+First a .rnk file containing all the 14265 genes was saved locally.
+
+```{r}
+
+# Ranking Genes
+# We rank the genes based on both significance (PValue) and direction of change (logFC).
+
+ranked_genes <- de_results %>%
+  filter(gene %in% mapped) %>% # Ensure we only rank genes with valid HGNC symbols
+  mutate(
+    rank = -log10(PValue) * sign(logFC)
+  ) %>%
+  arrange(desc(rank)) %>%
+  dplyr::select(gene, rank)
+
+# Check for any NAs or infinite values which break GSEA
+ranked_genes <- ranked_genes %>% 
+  filter(!is.na(rank) & !is.infinite(rank))
+
+# Exporting the .rnk file
+# This file is formatted for the GSEA JAVA version.
+
+rnk_file <- "GSE240722_CD73KD_vs_Control.rnk"
+write.table(ranked_genes, 
+            file = rnk_file, 
+            quote = FALSE, 
+            sep = "\t", 
+            row.names = FALSE, 
+            col.names = FALSE)
+```
+
+GSEA was run using the GSEA Java desktop application v4.3.2 (Subramanian et al., 2005) with the following parameters:
+
+```{r}
+# Ranked list (Provided): GSE240722_CD73KD_vs_Control.rnk
+# Gene sets database: downloaded the Human_GOBP_AllPathways_noPFOCR_no_GO_iea_September_01_2025_symbol.gmt 
+#   from Bader Lab website (Reimand et al., 2019). Removes computationally predicted annotations.
+# Collapse/Remap to genes: No_Collapse (it contains HGNC symbols)
+# Maximum gene set size (200): Filters out massive pathways that tell you very little 
+#   about the biological changes occurring.
+# Minimum gene set size (15): Filters out extremely small pathways to reduce noise
+# Gene set permutation: 2000 (after a discussion in class was told in class its the 
+#   standard if i dont want my computer crashing)
+```
+
+
+```{r}
+pos_gsea <- read.delim("gsea_report_for_na_pos_1772599422118.tsv", header = TRUE)
+
+datatable(
+  pos_gsea,
+  caption = "Table 4 - Pathways with Positive Enrichment (Up-Regulated) through GSEA",
+  options = list(pageLength = 10, scrollX = TRUE),
+  rownames = FALSE
+)
+```
+
+Table 4. Pathways with Positive Enrichment (Up-Regulated) through GSEA. Enrichment analysis without thresholds of up-regulated genes (ranked by magnitude, minimum size 15, maximum size 200) after CD73 knockdown in FN-RMS. The primary pathways emphasize significant changes in endoplasmic reticulum-to-Golgi vesicular transport, protein degradation, and quality control, illustrating the extensive structural and metabolic reorganization necessary for a cancer cell to leave the cell cycle and initiate differentiation.
+
+```{r}
+neg_gsea <- read.delim("gsea_report_for_na_neg_1772599422118.tsv", header = TRUE)
+
+datatable(
+  neg_gsea,
+  caption = "Table 5 - Pathways with Negative Enrichment (Down-Regulated) through GSEA",
+  options = list(pageLength = 10, scrollX = TRUE),
+  rownames = FALSE
+)
+```
+
+Table 5. Pathways with Negative Enrichment (Down-Regulated) identified through GSEA. Enrichment analysis of down-regulated genes (non-thresholded, ranked by magnitude, with a minimum size of 15 and a maximum size of 200) after CD73 knockdown in FN-RMS. The primary pathways clearly indicate a worldwide halt of the cellular growth machinery, primarily driven by the repression of E2F targets, the G2M checkpoint, DNA replication, and the separation of mitotic chromosomes
+
+
+# 6. Non-Thresholded vs. Thresholded Analysis {#comparison}
+
+Because the two approaches are essentially different, it is impossible to compare them directly, apples to apples.
+
+The genes with substantial fold-changes that exceeded the FDR are included in the thresholded analysis. Consequently, the findings of up-regulated ORA highlighted very specific terminal functional markers such "myofibril assembly" and "sarcomere organization." Specific oncogenic drivers, like "integrin-mediated signalling" and "basement membrane organization," which frequently control metastasis, were the focus of the down-regulated ORA.
+
+The entire ranked genelist is examined using GSEA. The most notable negatively regulated mechanism in GSEA was the downregulation of the cell cycle (E2F targets, G2M checkpoint, mitosis). implying that the CD73 deletion is effective and that the cell changes from being carcinogenic to showing healthy characteristics. Similarly, the positively enriched GSEA pathway was broader and included both ER-to-Golgi transport and protein degradation. Although they might indicate that the cell is changing its signalling in order to differentiate, the routes proposed are too broad to conclude that they are causing cell differentiation.
+
+While GSEA looks at the more expansive network (cell cycle arrest and capacity for differentiation). ORA looked at a similar themed smaller network. Both reached  the same conclusions as the original study of promoted cell differentiation and halted cell migration. However, this also shows how a few upregulated or downregulated genes can push the whole network to pass the threshold. 
+
+
+# 7. Visualization in Cytoscape {#cytoscape}
+
+The data were imported into Cytoscape (Shannon et al., 2003) using EnrichmentMap (Merico et al., 2010) in order to show the non-thresholded Gene Set Enrichment Analysis (GSEA). For the False Discovery Rate (FDR), a q-value threshold of 0.01 was applied. The Jaccard overlap coefficient cutoff of 0.375 and the usual uncorrected p-value threshold of 1.0 were kept at their default values in EnrichmentMap. The original network had 1729 edges (the shared genes between those sets) and 244 nodes (each representing a unique enriched gene collection).
+
+![**Figure 1** - Initial CD73 knockout enrichment map in FN-RMS. Prior to the manual spatial organization, the network identifies paths that are significantly enriched (FDR q-value < 0.01). Different gene sets are represented by nodes, where blue indicates down-regulated pathways and red indicates up-regulated pathways. Edges use the conventional Jaccard coefficient to show the degree of gene overlap between pathways.](fig_1.png)
+
+## 7.1 Annotation {#annotation}
+
+AutoAnnotate (Kucera et al., 2016) categorized these nodes into biological themes. The network was grouped utilizing the default MCL (Markov Cluster) algorithm, and cluster identifiers were produced automatically through the default WordCloud application. The choices "Create singleton clusters" and "Layout network to minimize cluster overlap" were chosen to visually categorize connected clusters and effectively arrange isolated single-node pathways. The maximum number of words per label was established at 3, the minimum word frequency at 1, and the adjacent word bonus at 8.
+
+![**Figure 2** - Self-Tagged Enrichment Map. The GSEA network classified into separate biological clusters through AutoAnnotate (Kucera et al., 2016). Nodes are categorized according to gene overlap, and overarching labels encapsulate the primary biological function of each cluster. The clear separation of red (up-regulated) and blue (down-regulated) clusters emphasizes the different cellular programming caused by CD73 inhibition.](fig_2.png)
+
+## 7.2 Theme Summary {#theme-summary}
+
+To reduce the network to its fundamental biological story, the annotated map was condensed into a Theme Network (Summary Network). In this perspective, complete clusters are condensed into individual thematic nodes, simplifying the complexity to the most significant biological changes.
+
+![**Figure 3** - Collapsed Theme Summary Network. An overarching perspective of the key biological themes influenced by the knockdown of CD73. Every node symbolizes a condensed AutoAnnotate cluster, with the size of the node corresponding to the quantity of included pathways. The network displays a substantial, prevailing cluster of down-regulated themes (blue) mainly controlling cell cycle and mitosis, along with specific up-regulated themes (red) associated with cellular transport and degradation.](fig_3.png)
+
+
+# 8. Major Themes {#major-themes}
+
+The summary network is simpler to navigate and shows that the reaction to CD73 knockdown is mainly characterized by down-regulated themes. The significant clusters in blue include themes such as hallmark e2f targets, hallmark g2m checkpoint, regulation of dna replication, and alignment of spindle chromosomes. This corresponds with the study's results: CD73 knockdown in FN-RMS leads to reduced tumor growth potential, consequently decreasing the likelihood of metastasis.
+
+The network also emphasizes a theme that was mostly overlooked in GSEA, g:Profile, or the original paper: the down-regulation of DNA repair mechanisms, particularly the homologous HRR repair and Fanconi anemia pathway. This indicates that although CD73 knockdown effectively stops proliferation and encourages differentiation, it fails to eliminate the underlying genomic instability that might have caused the sarcoma. The cell has now forfeited its main method for fixing DNA breaks, leaving it extremely susceptible to recurring cancer.
+
+
+# 9. Conclusion {#conclusion}
+
+An enrichment analysis of GSE240722 was done through both thresholded and non-thresholded methods. They provided a better understanding of CD73's role in fusion-negative rhabdomyosarcoma (FN-RMS). In over-representation analysis of CD73 knockdown leads to differentiation of the cell and downregulation of metastatic pathways. In comparison, the non-thresholded GSEA and its Cytoscape network gave a broader view of the transcriptome, with majority of themes being downregulated, notable ones showing a down-regulation of the cell cycle and mitotic division pathways, and upregulated themes being metabolic and vesicular transport pathways, suggesting differentiation, but such conclusion cannot be reached just based on this result alone. The network also revealed a previously overlooked pathway regarding the downregulation of DNA repair mechanisms like homologous recombination, indicating that while CD73 knockdown halts proliferation and promotes differentiation, it leaves the cells highly vulnerable to other DNA-damaging agents.
+
+
+# Assignment Questions {#questions}
+
+| # | Question | Section |
+|:-:|:---------|:--------|
+| 1 | Which method did you choose and why? | [Section 3 - Over-Representation Analysis](#ora) |
+| 2 | What annotation data did you use and why? What version? | [Section 2 - Threshold Based Analysis Using g:Profiler](#gprofiler) |
+| 3 | How many genesets were returned with what thresholds? | [Section 3 - Over-Representation Analysis](#ora), Tables 1–3 |
+| 4 | Up-regulated vs. down-regulated vs. whole list? | [Section 3.1 - Directional Analysis](#directional) |
+| 5 | Do the ORA results support the original paper? | [Section 4 - Interpretation and Literature](#interpretation-ora) |
+| 6 | Supporting publications for ORA results? | [Section 4 - Interpretation and Literature](#interpretation-ora) |
+| 7 | What method/genesets for GSEA? Versions? | [Section 5 - Non-Thresholded GSEA Analysis](#gsea) |
+| 8 | Summarize enrichment results | [Section 5 - Non-Thresholded GSEA Analysis](#gsea), Tables 4–5 |
+| 9 | How do GSEA results compare to thresholded? | [Section 6 - Non-Thresholded vs. Thresholded Analysis](#comparison) |
+| 10 | Enrichment map: nodes, edges, thresholds? | [Section 7 - Visualization in Cytoscape](#cytoscape) |
+| 11 | Annotation parameters? | [Section 7.1 - Annotation](#annotation) |
+| 12 | Publication-ready figure with legends? | Figures 1–3 |
+| 13 | Theme network: major themes, novel pathways? | [Section 8 - Major Themes](#major-themes) |
+| 14 | Do enrichment results support the original paper? | [Section 8 - Major Themes](#major-themes) and [Section 9 - Conclusion](#conclusion) |
+
+
+# References {#references}
+
+Ashburner, M., Ball, C. A., Blake, J. A., Botstein, D., Butler, H., Cherry, J. M., … Sherlock, G. (2000). Gene Ontology: Tool for the unification of biology. *Nature Genetics*, *25*(1), 25–29. https://doi.org/10.1038/75556
+
+Chen, Y., Chen, L., Lun, A. T. L., Baldoni, P., & Smyth, G. K. (2025). edgeR v4: Powerful differential analysis of sequencing data with expanded functionality and improved support for small counts and larger datasets. *Nucleic Acids Research*, *53*(2), gkaf018. https://doi.org/10.1093/nar/gkaf018
+
+Gene Ontology Consortium. (2021). The Gene Ontology resource: Enriching a GOld mine. *Nucleic Acids Research*, *49*(D1), D325–D334. https://doi.org/10.1093/nar/gkaa1113
+
+Gillespie, M. et al. (2024). Reactome: A curated knowledgebase of biological pathways. *Nucleic Acids Research*, *52*(D1), D672–D678. https://doi.org/10.1093/nar/gkad1025
+
+Hernandez, K. C., Shah, A. M., Lopez, V. A., Tagliabracci, V. S., Chen, K., Xu, L., Bassel-Duby, R., Olson, E. N., & Liu, N. (2024). CD73 contributes to the pathogenesis of fusion-negative rhabdomyosarcoma through the purinergic signaling pathway. *Proceedings of the National Academy of Sciences*, *121*(4), e2315925121. https://doi.org/10.1073/pnas.2315925121
+
+Kolberg, L., Raudvere, U., Kuzmin, I., Adler, P., Vilo, J., & Peterson, H. (2023). g:Profiler—interoperable web service for functional enrichment analysis and gene identifier mapping (2023 update). *Nucleic Acids Research*, *51*(W1), W207–W212. https://doi.org/10.1093/nar/gkad347
+
+Kucera, M., Isserlin, R., Arkhangorodsky, A., & Bader, G. D. (2016). AutoAnnotate: A Cytoscape app for summarizing networks with semantic annotations. *F1000Research*, *5*, 1717. https://doi.org/10.12688/f1000research.9090.1
+
+Martens, M. et al. (2021). WikiPathways: Connecting communities. *Nucleic Acids Research*, *49*(D1), D613–D621. https://doi.org/10.1093/nar/gkaa1024
+
+Merico, D., Isserlin, R., Stueker, O., Emili, A., & Bader, G. D. (2010). Enrichment Map: A network-based method for gene-set enrichment visualization and interpretation. *PLoS ONE*, *5*(11), e13984. https://doi.org/10.1371/journal.pone.0013984
+
+Reimand, J., Isserlin, R., Voisin, V., Kucera, M., Tannus-Lopes, C., Rostamianfar, A., … Bader, G. D. (2019). Pathway enrichment analysis and visualization of omics data using g:Profiler, GSEA, Cytoscape and EnrichmentMap. *Nature Protocols*, *14*(2), 482–517. https://doi.org/10.1038/s41596-018-0103-9
+
+Robinson, M. D., & Oshlack, A. (2010). A scaling normalization method for differential expression analysis of RNA-seq data. *Genome Biology*, *11*(3), R25. https://doi.org/10.1186/gb-2010-11-3-r25
+
+Shannon, P., Markiel, A., Ozier, O., Baliga, N. S., Wang, J. T., Ramage, D., … Ideker, T. (2003). Cytoscape: A software environment for integrated models of biomolecular interaction networks. *Genome Research*, *13*(11), 2498–2504. https://doi.org/10.1101/gr.1239303
+
+Subramanian, A., Tamayo, P., Mootha, V. K., Mukherjee, S., Ebert, B. L., Gillette, M. A., … Mesirov, J. P. (2005). Gene set enrichment analysis: A knowledge-based approach for interpreting genome-wide expression profiles. *Proceedings of the National Academy of Sciences*, *102*(43), 15545–15550. https://doi.org/10.1073/pnas.0506580102
+
+Xue F, Wang T, Shi H, Feng H, Feng G, Wang R, Yao Y, Yuan H. CD73 facilitates invadopodia formation and boosts malignancy of head and neck squamous cell carcinoma via the MAPK signaling pathway. Cancer Sci. 2022 Aug;113(8):2704-2715. doi: 10.1111/cas.15452. Epub 2022 Jun 16. PMID: 35657703; PMCID: PMC9357645. 
+
+Wickham, H., François, R., Henry, L., Müller, K., & Vaughan, D. (2023). *dplyr: A grammar of data manipulation*. R package version 1.1.4. https://CRAN.R-project.org/package=dplyr
+
+Xie, Y., Cheng, J., & Tan, X. (2024). *DT: A wrapper of the JavaScript library 'DataTables'*. R package version 0.33. https://CRAN.R-project.org/package=DT
+
+Ganguly KK, Pal S, Moulik S, Chatterjee A. Integrins and metastasis. Cell Adh Migr. 2013 May-Jun;7(3):251-61. doi: 10.4161/cam.23840. Epub 2013 Apr 5. PMID: 23563505; PMCID: PMC3711990.
+
+# Journal Entry {#journal}
+
+All Journal Entries can be viewed on GitHub: https://github.com/bcb420-2026/Neyo_Thakkar/wiki
